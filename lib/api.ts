@@ -1,5 +1,3 @@
-import supabase from './supabaseClient';
-
 // =========
 // TypeDefs
 // =========
@@ -46,93 +44,50 @@ export interface SignupResult {
 // Auth / Accounts
 // ================
 
+const BACKEND_BASE_URL = 'https://your-backend.onrender.com';
+
+async function handleResponse<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Request failed with status ${response.status}`);
+  }
+
+  return (await response.json()) as T;
+}
+
 export async function signup(
   email: string,
   password: string,
   companyName: string,
 ): Promise<SignupResult> {
-  // 1) Create company
-  const {
-    data: company,
-    error: companyError,
-  } = await supabase
-    .from('companies')
-    .insert({
-      name: companyName,
-      shopify_domain: null,
-      api_key: null,
-      access_token: null,
-    })
-    .select('*')
-    .single();
-
-  if (companyError || !company) {
-    throw new Error(companyError?.message ?? 'Failed to create company');
-  }
-
-  // 2) Create user linked to company
-  const {
-    data: user,
-    error: userError,
-  } = await supabase
-    .from('users')
-    .insert({
+  const response = await fetch(`${BACKEND_BASE_URL}/auth/signup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
       email,
-      // WARNING: for demo only. Store a proper password hash in a real application.
-      password_hash: password,
-      company_id: company.id,
-    })
-    .select('*')
-    .single();
+      password,
+      company_name: companyName,
+    }),
+  });
 
-  if (userError || !user) {
-    // At this point the company has already been created; in a real-world app you
-    // might want to clean it up via a backend RPC / transaction.
-    throw new Error(userError?.message ?? 'Failed to create user');
-  }
-
-  return {
-    user: user as AppUser,
-    company: company as Company,
-  };
+  // The backend should return a JSON body matching SignupResult
+  // { user: AppUser, company: Company }
+  return handleResponse<SignupResult>(response);
 }
 
 export async function login(email: string, password: string): Promise<LoginResult> {
-  const {
-    data: user,
-    error,
-  } = await supabase
-    .from('users')
-    .select('*')
-    .eq('email', email)
-    .eq('password_hash', password)
-    .maybeSingle();
+  const response = await fetch(`${BACKEND_BASE_URL}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email,
+      password,
+    }),
+  });
 
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  if (!user) {
-    throw new Error('Invalid email or password');
-  }
-
-  const {
-    data: company,
-    error: companyError,
-  } = await supabase
-    .from('companies')
-    .select('*')
-    .eq('id', user.company_id)
-    .maybeSingle();
-
-  if (companyError) {
-    throw new Error(companyError.message);
-  }
-
-  return {
-    user: user as AppUser,
-    company: (company as Company) ?? null,
-  };
+  // The backend should return a JSON body matching LoginResult
+  // { user: AppUser, company: Company | null }
+  return handleResponse<LoginResult>(response);
 }
 
 // =================
@@ -142,22 +97,17 @@ export async function login(email: string, password: string): Promise<LoginResul
 export async function fetchDashboardData(
   companyId: number,
 ): Promise<DashboardData | null> {
-  const {
-    data,
-    error,
-  } = await supabase
-    .from('dashboard_data')
-    .select('*')
-    .eq('company_id', companyId)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const response = await fetch(`${BACKEND_BASE_URL}/dashboard/${companyId}`, {
+    method: 'GET',
+  });
 
-  if (error) {
-    throw new Error(error.message);
+  // The backend should return either null/404 or a single DashboardData object
+  // If the backend wraps it differently, adjust this mapping accordingly.
+  if (response.status === 404) {
+    return null;
   }
 
-  return (data as DashboardData) ?? null;
+  return handleResponse<DashboardData | null>(response);
 }
 
 // ==========
@@ -170,25 +120,12 @@ export async function saveSettings(
   apiKey: string,
   accessToken: string,
 ): Promise<Company> {
-  const {
-    data,
-    error,
-  } = await supabase
-    .from('companies')
-    .update({
-      shopify_domain: shopifyDomain,
-      api_key: apiKey,
-      access_token: accessToken,
-    })
-    .eq('id', companyId)
-    .select('*')
-    .single();
-
-  if (error || !data) {
-    throw new Error(error?.message ?? 'Failed to save settings');
-  }
-
-  return data as Company;
+  // This helper now calls the FastAPI settings endpoint underneath
+  return saveCompanySettings(companyId, {
+    storeDomain: shopifyDomain,
+    apiKey,
+    accessToken,
+  });
 }
 
 // ===========
@@ -196,15 +133,9 @@ export async function saveSettings(
 // ===========
 
 export async function fetchCompanies(): Promise<Company[]> {
-  const { data, error } = await supabase.from('companies').select('*').order('created_at', {
-    ascending: false,
-  });
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return (data as Company[]) ?? [];
+  // This function still uses Supabase directly in the original implementation.
+  // If you add an admin endpoint in FastAPI, you can update this to use fetch as well.
+  throw new Error('fetchCompanies is not implemented against the FastAPI backend yet.');
 }
 
 // ====================
@@ -220,26 +151,37 @@ export interface CompanySettingsInput {
 export async function fetchCompanySettings(
   companyId: number,
 ): Promise<Company | null> {
-  const {
-    data,
-    error,
-  } = await supabase
-    .from('companies')
-    .select('*')
-    .eq('id', companyId)
-    .maybeSingle();
+  const response = await fetch(`${BACKEND_BASE_URL}/settings/${companyId}`, {
+    method: 'GET',
+  });
 
-  if (error) {
-    throw new Error(error.message);
+  if (response.status === 404) {
+    return null;
   }
 
-  return (data as Company) ?? null;
+  // The backend should return a structure that can be mapped to Company.
+  // If necessary, adapt the mapping here to match the backend response.
+  return handleResponse<Company | null>(response);
 }
 
 export async function saveCompanySettings(
   companyId: number,
   settings: CompanySettingsInput,
 ): Promise<Company> {
-  return saveSettings(companyId, settings.storeDomain, settings.apiKey, settings.accessToken);
+  const response = await fetch(`${BACKEND_BASE_URL}/settings/${companyId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      shopify: {
+        shop_domain: settings.storeDomain,
+        api_key: settings.apiKey,
+        access_token: settings.accessToken,
+      },
+    }),
+  });
+
+  // The backend should return a structure that can be mapped to Company.
+  // If necessary, adapt the mapping here to match the backend response.
+  return handleResponse<Company>(response);
 }
 
