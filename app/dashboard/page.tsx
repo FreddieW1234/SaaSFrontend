@@ -6,10 +6,7 @@ import { fetchDashboardData, type DashboardData } from "@/lib/api";
 // Placeholder auth/session hook.
 // Replace this with your real auth/session implementation (e.g. Supabase auth, NextAuth, custom context).
 const useCompanyId = (): number | null => {
-  // Example:
-  // const { session } = useAuth();
-  // return session?.companyId ?? null;
-  return null;
+  return 1; // temporary test company ID
 };
 
 const DashboardPage: React.FC = () => {
