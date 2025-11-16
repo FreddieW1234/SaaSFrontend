@@ -1,3 +1,5 @@
+import React from 'react';
+
 // =========
 // TypeDefs
 // =========
@@ -20,20 +22,30 @@ export interface AppUser {
 }
 
 export interface DashboardData {
-  id: number;
-  company_id: number;
-  data_json: unknown;
-  created_at: string;
+  company_id: string;
+  name: string;
+  data: unknown | null;
 }
 
 export interface LoginResult {
-  user: AppUser;
-  company: Company | null;
+  userId: string;
+  companyId: string;
 }
 
 export interface SignupResult {
-  user: AppUser;
-  company: Company;
+  userId: string;
+  companyId: string;
+}
+
+export interface LoginCredentials {
+  email: string;
+  password: string;
+}
+
+export interface SignupCredentials {
+  email: string;
+  password: string;
+  companyName: string;
 }
 
 // NOTE: In a real application you should NEVER store or compare raw passwords on the client.
@@ -70,9 +82,15 @@ export async function signup(
     }),
   });
 
-  // The backend should return a JSON body matching SignupResult
-  // { user: AppUser, company: Company }
-  return handleResponse<SignupResult>(response);
+  const result = await handleResponse<SignupResult>(response);
+  
+  // Store companyId in localStorage
+  if (result.companyId) {
+    localStorage.setItem('companyId', result.companyId);
+    localStorage.setItem('userId', result.userId);
+  }
+  
+  return result;
 }
 
 export async function login(email: string, password: string): Promise<LoginResult> {
@@ -85,9 +103,40 @@ export async function login(email: string, password: string): Promise<LoginResul
     }),
   });
 
-  // The backend should return a JSON body matching LoginResult
-  // { user: AppUser, company: Company | null }
-  return handleResponse<LoginResult>(response);
+  const result = await handleResponse<LoginResult>(response);
+  
+  // Store companyId in localStorage
+  if (result.companyId) {
+    localStorage.setItem('companyId', result.companyId);
+    localStorage.setItem('userId', result.userId);
+  }
+  
+  return result;
+}
+
+// Helper functions for login/signup pages
+export async function handleLogin(credentials: LoginCredentials): Promise<void> {
+  try {
+    const result = await login(credentials.email, credentials.password);
+    // Redirect to dashboard after successful login
+    window.location.href = '/dashboard';
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Login failed';
+    alert(message);
+    throw error;
+  }
+}
+
+export async function handleSignup(credentials: SignupCredentials): Promise<void> {
+  try {
+    const result = await signup(credentials.email, credentials.password, credentials.companyName);
+    // Redirect to dashboard after successful signup
+    window.location.href = '/dashboard';
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Signup failed';
+    alert(message);
+    throw error;
+  }
 }
 
 // =================
@@ -95,19 +144,44 @@ export async function login(email: string, password: string): Promise<LoginResul
 // =================
 
 export async function fetchDashboardData(
-  companyId: number,
+  companyId: number | string,
 ): Promise<DashboardData | null> {
   const response = await fetch(`${BACKEND_BASE_URL}/dashboard/${companyId}`, {
     method: 'GET',
   });
 
-  // The backend should return either null/404 or a single DashboardData object
-  // If the backend wraps it differently, adjust this mapping accordingly.
+  // The backend returns DashboardCompanyResponse with company_id, name, and data
   if (response.status === 404) {
     return null;
   }
 
-  return handleResponse<DashboardData | null>(response);
+  return handleResponse<DashboardData>(response);
+}
+
+// Hook to get companyId from localStorage (proper React hook)
+export function useCompanyId(): number | null {
+  const [companyId, setCompanyId] = React.useState<number | null>(null);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    
+    const stored = localStorage.getItem('companyId');
+    const parsed = stored ? parseInt(stored, 10) : null;
+    setCompanyId(parsed);
+
+    // Listen for storage changes (e.g., when user logs in from another tab)
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'companyId') {
+        const newValue = e.newValue ? parseInt(e.newValue, 10) : null;
+        setCompanyId(newValue);
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
+
+  return companyId;
 }
 
 // ==========
@@ -149,7 +223,7 @@ export interface CompanySettingsInput {
 }
 
 export async function fetchCompanySettings(
-  companyId: number,
+  companyId: number | string,
 ): Promise<Company | null> {
   const response = await fetch(`${BACKEND_BASE_URL}/settings/${companyId}`, {
     method: 'GET',
@@ -159,13 +233,12 @@ export async function fetchCompanySettings(
     return null;
   }
 
-  // The backend should return a structure that can be mapped to Company.
-  // If necessary, adapt the mapping here to match the backend response.
-  return handleResponse<Company | null>(response);
+  // Backend returns CompanyResponse which matches Company interface
+  return handleResponse<Company>(response);
 }
 
 export async function saveCompanySettings(
-  companyId: number,
+  companyId: number | string,
   settings: CompanySettingsInput,
 ): Promise<Company> {
   const response = await fetch(`${BACKEND_BASE_URL}/settings/${companyId}`, {
@@ -180,8 +253,7 @@ export async function saveCompanySettings(
     }),
   });
 
-  // The backend should return a structure that can be mapped to Company.
-  // If necessary, adapt the mapping here to match the backend response.
+  // Backend returns CompanyResponse which matches Company interface
   return handleResponse<Company>(response);
 }
 
